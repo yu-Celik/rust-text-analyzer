@@ -19,14 +19,23 @@ fn main() {
 
             // Appeler la méthode remove_special_characters ici pour préserver les caractères spéciaux
             analyzer.remove_special_characters();
-            analyzer.word_count();
-            analyzer.average_word_length();
+            analyzer.count_words();
             analyzer.filter_banned_words();
 
+            analyzer.word_frequency();
+            analyzer.word_frequency_ngrams(2);
+            analyzer.word_frequency_ngrams(3);
+            analyzer.word_frequency_ngrams(4);
+            analyzer.word_frequency_ngrams(5);
 
-            analyzer.print_punctuation_stats();
-            analyzer.print_word_count();
-            analyzer.print_longest_sentences();
+            analyzer.average_word_length();
+
+            
+            // analyzer.print_word_frequency();
+            // analyzer.print_word_frequency_twograms();
+            // analyzer.print_punctuation_stats();
+            // analyzer.print_word_count();
+            // analyzer.print_longest_sentences();
             analyzer.print_average_word_length();
         }
         Err(e) => eprintln!("Error reading file {} : {}", file_path, e),

@@ -7,6 +7,10 @@ pub struct TextAnalyzer {
     content: String,
     word_count: usize,
     word_frequency: HashMap<String, usize>,
+    word_frequency_twograms: HashMap<String, usize>,
+    word_frequency_trigrams: HashMap<String, usize>,
+    word_frequency_fourgrams: HashMap<String, usize>,
+    word_frequency_fivegrams: HashMap<String, usize>,
     average_word_length: f64,
     longest_sentences: Vec<String>,
     punctuation_stats: HashMap<char, usize>,
@@ -26,6 +30,10 @@ impl TextAnalyzer {
             content,
             word_count: 0,
             word_frequency: HashMap::new(),
+            word_frequency_twograms: HashMap::new(),
+            word_frequency_trigrams: HashMap::new(),
+            word_frequency_fourgrams: HashMap::new(),
+            word_frequency_fivegrams: HashMap::new(),
             average_word_length: 0.0,
             longest_sentences: vec![],
             punctuation_stats: HashMap::new(),
@@ -34,9 +42,8 @@ impl TextAnalyzer {
     }
 
     pub fn analyze(&mut self) {
-        self.content = self.content.to_string();
+        self.content = self.content.to_lowercase();
     }
-
 
     /// Removes special characters from the analyzer's content.
     ///
@@ -87,29 +94,54 @@ impl TextAnalyzer {
             .join(" ");
     }
 
-    pub fn word_count(&mut self) -> usize {
-        let words = self.content.split_whitespace();
-        self.word_count = 0;
-        for word in words {
-            self.word_count += 1;
-            *self.word_frequency.entry(word.to_lowercase()).or_insert(0) += 1;
+    pub fn word_frequency(&mut self) {
+        for word in self.content.split_whitespace() {
+            *self.word_frequency.entry(word.to_string()).or_insert(0) += 1;
+        }
+    }
+    pub fn word_frequency_ngrams(&mut self, n: usize) {
+        let words: Vec<&str> = self.content.split_whitespace().collect();
+        if words.len() < n {
+            return;
         }
 
-        self.word_count
+        let ngram_map = match n {
+            2 => &mut self.word_frequency_twograms,
+            3 => &mut self.word_frequency_trigrams,
+            4 => &mut self.word_frequency_fourgrams,
+            5 => &mut self.word_frequency_fivegrams,
+            _ => {
+                println!("Taille de n-gramme non prise en charge : {}", n);
+                panic!("Taille de n-gramme non prise en charge");
+            }
+        };
+
+        ngram_map.clear(); // Effacement des fréquences existantes
+
+        for window in words.windows(n) {
+            let ngram = window.join(" ");
+            *ngram_map.entry(ngram.clone()).or_insert(0) += 1;
+        }
     }
 
-    pub fn word_frequency(&self, word: &String) -> usize {
+    pub fn count_words(&mut self) -> usize {
+        let count = self.content.split_whitespace().count();
+        self.word_count = count;
+        count
+    }
+
+    pub fn count_word_frequency(&self, word: &String) -> usize {
         *self.word_frequency.get(word).unwrap_or(&0)
     }
 
     pub fn average_word_length(&mut self) -> f64 {
         let mut total_length = 0.0;
-        let mut total_words = 0;
-
+    
+        let total_words = self.count_words();
+    
         self.average_word_length = 0.0;
         for (word, &frequency) in &self.word_frequency {
             total_length += word.len() as f64 * frequency as f64;
-            total_words += frequency;
         }
         self.average_word_length = if total_words > 0 {
             total_length / total_words as f64
@@ -142,13 +174,12 @@ impl TextAnalyzer {
     }
 
     pub fn filter_banned_words(&mut self) {
-        self.word_frequency = self
-            .word_frequency
-            .iter()
-            .filter(|&(word, _)| !self.ban_list.contains(word))
-            .map(|(word, &frequency)| (word.clone(), frequency))
-            .collect();
-        println!("{:?}", self.word_frequency);
+        let words: Vec<&str> = self.content.split_whitespace().collect();
+        self.content = words
+            .into_iter()
+            .filter(|word| !self.ban_list.contains(*word))
+            .collect::<Vec<&str>>()
+            .join(" ");
     }
 
     pub fn print_content(&self) {
@@ -156,10 +187,7 @@ impl TextAnalyzer {
     }
 
     pub fn print_average_word_length(&self) {
-        println!(
-            "Average word length: {:.2}",
-            self.average_word_length
-        );
+        println!("Average word length: {:.2}", self.average_word_length);
     }
 
     pub fn print_punctuation_stats(&self) {
@@ -180,6 +208,38 @@ impl TextAnalyzer {
         println!("Word frequency :");
         for (mot, frequence) in &self.word_frequency {
             println!("  {} : {}", mot, frequence);
+        }
+    }
+
+    pub fn print_word_frequency(&self) {
+        println!("Fréquence des mots :");
+        for (word, count) in &self.word_frequency {
+            println!("{}: {}", word, count);
+        }
+    }
+
+    pub fn print_word_frequency_twograms(&self) {
+        println!("Fréquence des twograms :");
+        for (twogram, count) in &self.word_frequency_twograms {
+            println!("{}: {}", twogram, count);
+        }
+    }
+    pub fn print_word_frequency_trigrams(&self) {
+        println!("Fréquence des trigrammes :");
+        for (trigram, count) in &self.word_frequency_trigrams {
+            println!("{}: {}", trigram, count);
+        }
+    }
+    pub fn print_word_frequency_fourgrams(&self) {
+        println!("Fréquence des fourgrams :");
+        for (fourgram, count) in &self.word_frequency_fourgrams {
+            println!("{}: {}", fourgram, count);
+        }
+    }
+    pub fn print_word_frequency_fivegrams(&self) {
+        println!("Fréquence des fivegrams :");
+        for (fivegram, count) in &self.word_frequency_fivegrams {
+            println!("{}: {}", fivegram, count);
         }
     }
 }
