@@ -137,7 +137,7 @@ impl TextAnalyzer {
     pub fn average_word_length(&mut self) -> f64 {
         let mut total_length = 0.0;
     
-        let total_words = self.count_words();
+        let total_words = self.word_count;
     
         self.average_word_length = 0.0;
         for (word, &frequency) in &self.word_frequency {
@@ -205,39 +205,35 @@ impl TextAnalyzer {
 
     pub fn print_word_count(&self) {
         println!("Word count : {}", self.word_count);
-        println!("Word frequency :");
-        for (mot, frequence) in &self.word_frequency {
-            println!("  {} : {}", mot, frequence);
-        }
     }
 
     pub fn print_word_frequency(&self) {
-        println!("Fréquence des mots :");
+        println!("Word frequency :");
         for (word, count) in &self.word_frequency {
             println!("{}: {}", word, count);
         }
     }
 
     pub fn print_word_frequency_twograms(&self) {
-        println!("Fréquence des twograms :");
+        println!("Twogram frequency :");
         for (twogram, count) in &self.word_frequency_twograms {
             println!("{}: {}", twogram, count);
         }
     }
     pub fn print_word_frequency_trigrams(&self) {
-        println!("Fréquence des trigrammes :");
+        println!("Trigram frequency :");
         for (trigram, count) in &self.word_frequency_trigrams {
             println!("{}: {}", trigram, count);
         }
     }
     pub fn print_word_frequency_fourgrams(&self) {
-        println!("Fréquence des fourgrams :");
+        println!("Fourgram frequency :");
         for (fourgram, count) in &self.word_frequency_fourgrams {
             println!("{}: {}", fourgram, count);
         }
     }
     pub fn print_word_frequency_fivegrams(&self) {
-        println!("Fréquence des fivegrams :");
+        println!("Fivegram frequency :");
         for (fivegram, count) in &self.word_frequency_fivegrams {
             println!("{}: {}", fivegram, count);
         }

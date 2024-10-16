@@ -31,12 +31,12 @@ fn main() {
             analyzer.average_word_length();
 
             
-            // analyzer.print_word_frequency();
-            // analyzer.print_word_frequency_twograms();
+            // analyzer.print_longest_sentences();
             // analyzer.print_punctuation_stats();
             // analyzer.print_word_count();
-            // analyzer.print_longest_sentences();
-            analyzer.print_average_word_length();
+            // analyzer.print_word_frequency();
+            // analyzer.print_word_frequency_twograms();
+            // analyzer.print_average_word_length();
         }
         Err(e) => eprintln!("Error reading file {} : {}", file_path, e),
     }
