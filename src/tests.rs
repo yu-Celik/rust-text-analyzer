@@ -108,7 +108,7 @@ mod tests {
         let mut analyzer =
             TextAnalyzer::new("programming_tips.txt", "stop_words_french.txt").unwrap();
         analyzer.content = String::from("C'est une courte phrase. Voici une phrase un peu plus longue. Cette phrase est la plus longue de toutes.");
-        let longest = analyzer.longest_sentences();
+        let longest = analyzer.longest_sentences(3);
         assert_eq!(longest[0], "Cette phrase est la plus longue de toutes.");
         assert_eq!(longest[1], "Voici une phrase un peu plus longue.");
         assert_eq!(longest[2], "C'est une courte phrase.");

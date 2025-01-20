@@ -22,3 +22,22 @@ Getting started with Rust is simple! Here are a few steps:
 In conclusion, Rust is an excellent choice for developers looking for a performant, safe, and modern language. Whether you're working on embedded systems, web applications, or command-line tools, Rust has something to offer!
 
 Remember: practice is the key to mastering Rust. Code, experiment, and have fun!
+
+
+public class Main {
+    public static void main(String[] args) {
+        Contact jph, = new Contact("John Doe", "john.doe@example.com", "1234567890");
+    }
+}
+
+public class Contact {
+    String name;
+    String email;
+    String phone;
+
+    __constructor(String name, String email, String phone) {
+        this.name = name;
+        this.email = email;
+        this.phone = phone;
+    }
+}

@@ -1,16 +1,21 @@
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::fs;
-mod tests;
+
 #[derive(Debug)]
 pub struct TextAnalyzer {
     content: String,
     word_count: usize,
     word_frequency: HashMap<String, usize>,
+    word_frequency_percentage: HashMap<String, f64>,
     word_frequency_twograms: HashMap<String, usize>,
+    word_frequency_twograms_percentage: HashMap<String, f64>,
     word_frequency_trigrams: HashMap<String, usize>,
+    word_frequency_trigrams_percentage: HashMap<String, f64>,
     word_frequency_fourgrams: HashMap<String, usize>,
+    word_frequency_fourgrams_percentage: HashMap<String, f64>,
     word_frequency_fivegrams: HashMap<String, usize>,
+    word_frequency_fivegrams_percentage: HashMap<String, f64>,
     average_word_length: f64,
     longest_sentences: Vec<String>,
     punctuation_stats: HashMap<char, usize>,
@@ -30,10 +35,15 @@ impl TextAnalyzer {
             content,
             word_count: 0,
             word_frequency: HashMap::new(),
+            word_frequency_percentage: HashMap::new(),
             word_frequency_twograms: HashMap::new(),
+            word_frequency_twograms_percentage: HashMap::new(),
             word_frequency_trigrams: HashMap::new(),
+            word_frequency_trigrams_percentage: HashMap::new(),
             word_frequency_fourgrams: HashMap::new(),
+            word_frequency_fourgrams_percentage: HashMap::new(),
             word_frequency_fivegrams: HashMap::new(),
+            word_frequency_fivegrams_percentage: HashMap::new(),
             average_word_length: 0.0,
             longest_sentences: vec![],
             punctuation_stats: HashMap::new(),
@@ -65,7 +75,7 @@ impl TextAnalyzer {
         self.content = self
             .content
             .split_whitespace()
-            .filter_map(|word| {
+            .filter_map(|word: &str| {
                 let filtered: String = word
                     .chars()
                     .enumerate()
@@ -98,29 +108,59 @@ impl TextAnalyzer {
         for word in self.content.split_whitespace() {
             *self.word_frequency.entry(word.to_string()).or_insert(0) += 1;
         }
+
+        // Calcul des pourcentages
+        let total_words = self.word_count as f64;
+        for (word, count) in &self.word_frequency {
+            let percentage = (*count as f64 * 100.0) / total_words;
+            self.word_frequency_percentage
+                .insert(word.clone(), percentage);
+        }
     }
+
     pub fn word_frequency_ngrams(&mut self, n: usize) {
         let words: Vec<&str> = self.content.split_whitespace().collect();
         if words.len() < n {
             return;
         }
 
-        let ngram_map = match n {
-            2 => &mut self.word_frequency_twograms,
-            3 => &mut self.word_frequency_trigrams,
-            4 => &mut self.word_frequency_fourgrams,
-            5 => &mut self.word_frequency_fivegrams,
+        let (ngram_map, percentage_map) = match n {
+            2 => (
+                &mut self.word_frequency_twograms,
+                &mut self.word_frequency_twograms_percentage,
+            ),
+            3 => (
+                &mut self.word_frequency_trigrams,
+                &mut self.word_frequency_trigrams_percentage,
+            ),
+            4 => (
+                &mut self.word_frequency_fourgrams,
+                &mut self.word_frequency_fourgrams_percentage,
+            ),
+            5 => (
+                &mut self.word_frequency_fivegrams,
+                &mut self.word_frequency_fivegrams_percentage,
+            ),
             _ => {
                 println!("Taille de n-gramme non prise en charge : {}", n);
-                panic!("Taille de n-gramme non prise en charge");
+                return;
             }
         };
 
-        ngram_map.clear(); // Effacement des fréquences existantes
+        ngram_map.clear();
+        percentage_map.clear();
 
+        // Calcul des fréquences
         for window in words.windows(n) {
             let ngram = window.join(" ");
-            *ngram_map.entry(ngram.clone()).or_insert(0) += 1;
+            *ngram_map.entry(ngram).or_insert(0) += 1;
+        }
+
+        // Calcul des pourcentages
+        let total_words = self.word_count as f64;
+        for (ngram, count) in ngram_map.iter() {
+            let percentage = (*count as f64 * 100.0) / total_words;
+            percentage_map.insert(ngram.clone(), percentage);
         }
     }
 
@@ -130,15 +170,11 @@ impl TextAnalyzer {
         count
     }
 
-    pub fn count_word_frequency(&self, word: &String) -> usize {
-        *self.word_frequency.get(word).unwrap_or(&0)
-    }
-
     pub fn average_word_length(&mut self) -> f64 {
         let mut total_length = 0.0;
-    
+
         let total_words = self.word_count;
-    
+
         self.average_word_length = 0.0;
         for (word, &frequency) in &self.word_frequency {
             total_length += word.len() as f64 * frequency as f64;
@@ -151,7 +187,7 @@ impl TextAnalyzer {
         self.average_word_length
     }
 
-    pub fn longest_sentences(&mut self) -> &[String] {
+    pub fn longest_sentences(&mut self, n: usize) -> &[String] {
         let sentences: Vec<&str> = self.content.split_inclusive(&['.', '!', '?']).collect();
         self.longest_sentences = sentences
             .into_iter()
@@ -160,7 +196,7 @@ impl TextAnalyzer {
             .collect();
 
         self.longest_sentences.sort_by(|a, b| b.len().cmp(&a.len()));
-        self.longest_sentences.truncate(3);
+        self.longest_sentences.truncate(n);
         &self.longest_sentences
     }
 
@@ -207,35 +243,94 @@ impl TextAnalyzer {
         println!("Word count : {}", self.word_count);
     }
 
-    pub fn print_word_frequency(&self) {
-        println!("Word frequency :");
-        for (word, count) in &self.word_frequency {
-            println!("{}: {}", word, count);
+    pub fn print_ngram_frequency(&self, n: usize) {
+        let (ngram_map, percentage_map) = match n {
+            1 => (&self.word_frequency, &self.word_frequency_percentage),
+            2 => (
+                &self.word_frequency_twograms,
+                &self.word_frequency_twograms_percentage,
+            ),
+            3 => (
+                &self.word_frequency_trigrams,
+                &self.word_frequency_trigrams_percentage,
+            ),
+            4 => (
+                &self.word_frequency_fourgrams,
+                &self.word_frequency_fourgrams_percentage,
+            ),
+            5 => (
+                &self.word_frequency_fivegrams,
+                &self.word_frequency_fivegrams_percentage,
+            ),
+            _ => {
+                println!("Taille de n-gramme non supportée: {}", n);
+                return;
+            }
+        };
+
+        let gram_name = match n {
+            1 => "Word",
+            2 => "Twogram",
+            3 => "Trigram",
+            4 => "Fourgram",
+            5 => "Fivegram",
+            _ => unreachable!(),
+        };
+
+        println!("\n{} frequency:", gram_name);
+
+        // Préparation des données triées
+        let mut frequency_vec: Vec<_> = ngram_map.iter().collect();
+        frequency_vec.sort_by(|a, b| b.1.cmp(a.1));
+
+        // Affichage des occurrences
+        println!("Occurrences:");
+        for (gram, count) in &frequency_vec {
+            println!("{}: {}", gram, count);
+        }
+
+        // Affichage des pourcentages
+        println!("\nPourcentages:");
+        for (gram, _) in frequency_vec {
+            if let Some(percentage) = percentage_map.get(gram) {
+                println!("{}: {:.2}%", gram, percentage);
+            }
         }
     }
 
-    pub fn print_word_frequency_twograms(&self) {
-        println!("Twogram frequency :");
-        for (twogram, count) in &self.word_frequency_twograms {
-            println!("{}: {}", twogram, count);
-        }
+    // Méthode pour créer un nom de fichier avec préfixe
+    fn create_filename(&self, prefix: &str, filename: &str) -> String {
+        format!("{}_{}", prefix, filename)
     }
-    pub fn print_word_frequency_trigrams(&self) {
-        println!("Trigram frequency :");
-        for (trigram, count) in &self.word_frequency_trigrams {
-            println!("{}: {}", trigram, count);
+
+    pub fn export_frequencies_to_csv(
+        &self,
+        prefix: &str,
+        filename: &str,
+    ) -> Result<(), Box<dyn Error>> {
+        use std::fs::File;
+        use std::io::{BufWriter, Write};
+
+        let full_filename = self.create_filename(prefix, filename);
+        let file = File::create(full_filename)?;
+        let mut writer = BufWriter::new(file);
+
+        // Écrire le BOM UTF-8 pour Excel
+        writer.write_all(&[0xEF, 0xBB, 0xBF])?;
+
+        // En-tête avec séparateur point-virgule
+        writeln!(writer, "mot;occurrences;pourcentage")?;
+
+        // Trier les mots par fréquence
+        let mut frequency_vec: Vec<_> = self.word_frequency.iter().collect();
+        frequency_vec.sort_by(|a, b| b.1.cmp(a.1));
+
+        // Écrire les données avec séparation par point-virgule
+        for (word, count) in frequency_vec {
+            let percentage = self.word_frequency_percentage.get(word).unwrap_or(&0.0);
+            writeln!(writer, "{};{};{:.2}%", word, count, percentage)?;
         }
-    }
-    pub fn print_word_frequency_fourgrams(&self) {
-        println!("Fourgram frequency :");
-        for (fourgram, count) in &self.word_frequency_fourgrams {
-            println!("{}: {}", fourgram, count);
-        }
-    }
-    pub fn print_word_frequency_fivegrams(&self) {
-        println!("Fivegram frequency :");
-        for (fivegram, count) in &self.word_frequency_fivegrams {
-            println!("{}: {}", fivegram, count);
-        }
+
+        Ok(())
     }
 }
