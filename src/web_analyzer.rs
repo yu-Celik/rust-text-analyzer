@@ -184,7 +184,7 @@ impl WebAnalyzer {
 
     pub fn _print_analysis(&self) {
         println!("\n=== Analyse de la page {} ===\n", self.url);
-        self.html_analyzer.print_stats();
+        self.html_analyzer._print_stats();
     }
 
     // Nouvelle méthode pour sauvegarder les URLs en échec

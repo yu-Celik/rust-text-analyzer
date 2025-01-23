@@ -121,7 +121,7 @@ impl TextAnalyzer {
             .map(|word| {
                 let mut cleaned = word.to_string();
                 for prefix in &prefixes_to_remove {
-                    if cleaned.to_lowercase().starts_with(prefix) {
+                    if cleaned.starts_with(prefix) {
                         cleaned = cleaned[prefix.len()..].to_string();
                         break;
                     }
@@ -190,26 +190,16 @@ impl TextAnalyzer {
         // Calculer les pourcentages
         let total_words = self.word_count as f64;
         match n {
-            1 => {
-                self.word_frequency_percentage =
-                    self.calculate_percentages(&self.word_frequency, total_words)
-            }
-            2 => {
-                self.word_frequency_twograms_percentage =
-                    self.calculate_percentages(&self.word_frequency_twograms, total_words)
-            }
-            3 => {
-                self.word_frequency_trigrams_percentage =
-                    self.calculate_percentages(&self.word_frequency_trigrams, total_words)
-            }
-            4 => {
-                self.word_frequency_fourgrams_percentage =
-                    self.calculate_percentages(&self.word_frequency_fourgrams, total_words)
-            }
-            5 => {
-                self.word_frequency_fivegrams_percentage =
-                    self.calculate_percentages(&self.word_frequency_fivegrams, total_words)
-            }
+            1 => self.word_frequency_percentage = 
+                self.calculate_percentages(&self.word_frequency, total_words),
+            2 => self.word_frequency_twograms_percentage = 
+                self.calculate_percentages(&self.word_frequency_twograms, total_words),
+            3 => self.word_frequency_trigrams_percentage = 
+                self.calculate_percentages(&self.word_frequency_trigrams, total_words),
+            4 => self.word_frequency_fourgrams_percentage = 
+                self.calculate_percentages(&self.word_frequency_fourgrams, total_words),
+            5 => self.word_frequency_fivegrams_percentage = 
+                self.calculate_percentages(&self.word_frequency_fivegrams, total_words),
             _ => {}
         }
     }
@@ -477,6 +467,7 @@ impl TextAnalyzer {
 
         // Nombre total de mots
         let word_count = self.word_count;
+
 
         println!("\nStatistiques globales:");
         println!(

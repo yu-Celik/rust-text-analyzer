@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use crate::TextAnalyzer;
+    use crate::text_analyzer::TextAnalyzer;
 
     #[test]
     fn test_word_count() {

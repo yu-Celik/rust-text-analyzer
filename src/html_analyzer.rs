@@ -128,7 +128,7 @@ impl HtmlAnalyzer {
     }
 
     /// Affiche les statistiques HTML
-    pub fn print_stats(&self) {
+    pub fn _print_stats(&self) {
         println!("\n=== Statistiques HTML ===");
         
         println!("\nFréquence des balises:");
