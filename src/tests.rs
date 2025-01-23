@@ -51,19 +51,29 @@ mod tests {
     #[test]
     fn test_word_frequency() {
         let mut analyzer = TextAnalyzer::new("analyser.txt", "stop_words_english.txt").unwrap();
-        analyzer.content =
-            String::from("The quick brown fox jumps over the lazy dog. The fox is quick.");
+        analyzer.content = String::from("The quick brown fox jumps over the lazy dog. The fox is quick.");
         analyzer.analyze();
         analyzer.remove_special_characters();
         analyzer.count_words();
-        // println!("{}", analyzer.content);
-        analyzer.word_frequency();
-        assert_eq!(analyzer.count_word_frequency(&"the".to_string()), 3);
-        assert_eq!(analyzer.count_word_frequency(&"quick".to_string()), 2);
-        assert_eq!(analyzer.count_word_frequency(&"fox".to_string()), 2);
-        assert_eq!(analyzer.count_word_frequency(&"jumps".to_string()), 1);
-        assert_eq!(analyzer.count_word_frequency(&"nonexistent".to_string()), 0);
+        analyzer.word_frequency_ngrams(1);
+    
+        // Les mots "the", "is", "over" devraient être filtrés car ce sont des stop words
+        assert_eq!(analyzer._count_word_frequency(&"quick".to_string()), 2);
+        assert_eq!(analyzer._count_word_frequency(&"fox".to_string()), 2);
+        assert_eq!(analyzer._count_word_frequency(&"jumps".to_string()), 1);
+        assert_eq!(analyzer._count_word_frequency(&"brown".to_string()), 1);
+        assert_eq!(analyzer._count_word_frequency(&"lazy".to_string()), 1);
+        assert_eq!(analyzer._count_word_frequency(&"dog".to_string()), 1);
+        
+        // Les stop words devraient retourner 0
+        assert_eq!(analyzer._count_word_frequency(&"the".to_string()), 0);
+        assert_eq!(analyzer._count_word_frequency(&"is".to_string()), 0);
+        assert_eq!(analyzer._count_word_frequency(&"over".to_string()), 0);
+        
+        // Mot inexistant
+        assert_eq!(analyzer._count_word_frequency(&"nonexistent".to_string()), 0);
     }
+
     #[test]
     fn test_word_frequency_french() {
         let mut analyzer =
@@ -72,12 +82,12 @@ mod tests {
         analyzer.analyze();
         analyzer.remove_special_characters();
         analyzer.count_words();
-        analyzer.word_frequency();
-        assert_eq!(analyzer.count_word_frequency(&"le".to_string()), 3);
-        assert_eq!(analyzer.count_word_frequency(&"chat".to_string()), 2);
-        assert_eq!(analyzer.count_word_frequency(&"est".to_string()), 2);
-        assert_eq!(analyzer.count_word_frequency(&"petit".to_string()), 1);
-        assert_eq!(analyzer.count_word_frequency(&"inexistant".to_string()), 0);
+        analyzer.word_frequency_ngrams(1);
+        assert_eq!(analyzer._count_word_frequency(&"le".to_string()), 0);
+        assert_eq!(analyzer._count_word_frequency(&"chat".to_string()), 2);
+        assert_eq!(analyzer._count_word_frequency(&"est".to_string()), 0);
+        assert_eq!(analyzer._count_word_frequency(&"petit".to_string()), 1);
+        assert_eq!(analyzer._count_word_frequency(&"inexistant".to_string()), 0);
     }
 
     #[test]
@@ -87,7 +97,7 @@ mod tests {
         analyzer.content = String::from("Le chat noir saute.");
         analyzer.remove_special_characters();
         analyzer.count_words();
-        analyzer.word_frequency();
+        analyzer.word_frequency_ngrams(1);
         assert_eq!(analyzer.average_word_length(), 3.75);
     }
 
@@ -132,7 +142,7 @@ mod tests {
         analyzer.content = String::from("The quick brown fox jumps.");
         analyzer.remove_special_characters();
         analyzer.count_words();
-        analyzer.word_frequency();
+        analyzer.word_frequency_ngrams(1);
         assert_eq!(analyzer.average_word_length(), 4.2);
     }
 
@@ -165,31 +175,67 @@ mod tests {
     }
 
     #[test]
-    fn test_generate_ngrams() {
-        let mut analyzer = TextAnalyzer::new("analyser.txt", "stop_words_english.txt").unwrap();
-        analyzer.content = String::from("hello world hello");
-        analyzer.word_frequency_ngrams(2);
+    fn test_clean_word() {
+        let mut analyzer = TextAnalyzer::new("analyser.txt", "stop_words_french.txt").unwrap();
+
+        // Test avec différents types d'articles
+        analyzer.content = String::from("l'école l'étudiant d'université c'est n'importe j'aime");
+        analyzer.clean_word();
         assert_eq!(
-            analyzer.word_frequency_twograms.get("hello world"),
-            Some(&1)
+            analyzer.content,
+            "école étudiant université est importe aime"
         );
-        assert_eq!(
-            analyzer.word_frequency_twograms.get("world hello"),
-            Some(&1)
-        );
+
+        // Test avec majuscules
+        analyzer.content = String::from("L'École D'Université");
+        analyzer.clean_word();
+        assert_eq!(analyzer.content, "École Université");
+
+        // Test avec mélange de mots avec et sans articles
+        analyzer.content = String::from("l'arbre est dans l'école");
+        analyzer.clean_word();
+        assert_eq!(analyzer.content, "arbre est dans école");
+
+        // Test avec apostrophes typographiques différentes
+        analyzer.content = String::from("l'ami l'étudiant");
+        analyzer.clean_word();
+        assert_eq!(analyzer.content, "ami étudiant");
     }
 
     #[test]
-    fn test_generate_ngrams_french() {
-        let mut analyzer =
-            TextAnalyzer::new("programming_tips.txt", "stop_words_french.txt").unwrap();
-        analyzer.content = String::from("bonjour le monde bonjour");
+    fn test_ngrams_count_decreases() {
+        let mut analyzer = TextAnalyzer::new("analyser.txt", "stop_words_french.txt").unwrap();
+
+        analyzer.content = String::from(
+            "le chat noir mange une souris grise dans la maison bleue pendant que le chien dort",
+        );
+
         analyzer.word_frequency_ngrams(2);
-        assert_eq!(analyzer.word_frequency_twograms.get("bonjour le"), Some(&1));
-        assert_eq!(analyzer.word_frequency_twograms.get("le monde"), Some(&1));
-        assert_eq!(
-            analyzer.word_frequency_twograms.get("monde bonjour"),
-            Some(&1)
+        let bigrams_count = *analyzer.unique_expressions.get(&2).unwrap_or(&0);
+
+        analyzer.word_frequency_ngrams(3);
+        let trigrams_count = *analyzer.unique_expressions.get(&3).unwrap_or(&0);
+
+        analyzer.word_frequency_ngrams(4);
+        let fourgrams_count = *analyzer.unique_expressions.get(&4).unwrap_or(&0);
+
+        println!(
+            "Bigrams: {}, Trigrams: {}, Fourgrams: {}",
+            bigrams_count, trigrams_count, fourgrams_count
+        );
+
+        assert!(
+            bigrams_count > trigrams_count,
+            "Le nombre de bigrammes ({}) devrait être supérieur au nombre de trigrammes ({})",
+            bigrams_count,
+            trigrams_count
+        );
+
+        assert!(
+            trigrams_count > fourgrams_count,
+            "Le nombre de trigrammes ({}) devrait être supérieur au nombre de quadrigrammes ({})",
+            trigrams_count,
+            fourgrams_count
         );
     }
 }

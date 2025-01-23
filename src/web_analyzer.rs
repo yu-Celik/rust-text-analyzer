@@ -28,24 +28,45 @@ impl WebAnalyzer {
         }
     }
 
-    pub async fn fetch_and_analyze(&mut self) -> Result<(), Box<dyn Error>> {
-        // Configuration du client avec des en-têtes appropriés
+    pub async fn fetch_and_analyze(&mut self, output_dir: &str) -> Result<(), Box<dyn Error>> {
+        // Configuration du client
         let client = reqwest::Client::builder()
-            .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+            .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36")
+            .danger_accept_invalid_certs(true)
             .build()?;
 
-        // Récupération du contenu de la page
-        let response = client.get(&self.url).send().await?;
-        self.content = response.text().await?;
+        // Tentative de récupération du contenu
+        let response = match client.get(&self.url).send().await {
+            Ok(resp) => resp,
+            Err(e) => {
+                println!("Erreur lors de la requête pour {}: {}", self.url, e);
+                // Sauvegarder l'URL en échec
+                self.save_failed_url(output_dir, "ko")?;
+                return Ok(());  // Retourne Ok pour continuer avec les autres URLs
+            }
+        };
 
-        // Extraction du texte
-        self.extract_text_content();
+        // Vérification du statut
+        if !response.status().is_success() {
+            println!("Statut HTTP non-succès pour {}: {}", self.url, response.status());
+            self.save_failed_url(output_dir, "ko")?;
+            return Ok(());
+        }
 
-        // Sauvegarde du texte dans un fichier
-        self.save_text_content("output.txt")?;
-
-        // Analyse du contenu HTML
-        self.html_analyzer.analyze(&self.content)?;
+        // Récupération du contenu
+        match response.text().await {
+            Ok(text) => {
+                self.content = text;
+                self.extract_text_content();
+                self.save_text_content(output_dir, "output.txt")?;
+                self.html_analyzer.analyze(&self.content)?;
+            }
+            Err(e) => {
+                println!("Erreur lors de la lecture du contenu de {}: {}", self.url, e);
+                self.save_failed_url(output_dir, "ko")?;
+                return Ok(());
+            }
+        }
 
         Ok(())
     }
@@ -135,24 +156,24 @@ impl WebAnalyzer {
     }
 
     pub fn get_domain_prefix(&self) -> String {
-        let domain = self.url
+        let without_protocol = self.url
             .trim_start_matches("https://")
             .trim_start_matches("http://")
             .trim_start_matches("www.")
-            .trim_end_matches('/')
-            .split('/')
-            .next()
-            .unwrap_or("default");
-
-        // Nettoyer le nom de domaine pour le nom de fichier
-        domain
+            .trim_end_matches('/');
+    
+        // Prendre tout le chemin, pas seulement le domaine
+        let full_path = without_protocol.replace('/', "_");
+    
+        // Nettoyer le chemin pour le nom de fichier
+        full_path
             .chars()
             .map(|c| if c.is_alphanumeric() { c } else { '_' })
             .collect::<String>()
     }
-
-    fn save_text_content(&self, filename: &str) -> Result<(), Box<dyn Error>> {
-        let full_filename = format!("{}_{}", self.get_domain_prefix(), filename);
+    fn save_text_content(&self, output_dir: &str, filename: &str) -> Result<(), Box<dyn Error>> {
+        let prefix = self.get_domain_prefix();
+        let full_filename = format!("{}/{}_{}", output_dir, prefix, filename);
         fs::write(full_filename, &self.text_content)?;
         Ok(())
     }
@@ -161,9 +182,16 @@ impl WebAnalyzer {
         &self.text_content
     }
 
-    pub fn print_analysis(&self) {
+    pub fn _print_analysis(&self) {
         println!("\n=== Analyse de la page {} ===\n", self.url);
         self.html_analyzer.print_stats();
     }
 
+    // Nouvelle méthode pour sauvegarder les URLs en échec
+    fn save_failed_url(&self, output_dir: &str, status: &str) -> Result<(), Box<dyn Error>> {
+        let prefix = self.get_domain_prefix();
+        let failed_file = format!("{}/{}_failed.txt", output_dir, prefix);
+        std::fs::write(failed_file, format!("{}\t{}", self.url, status))?;
+        Ok(())
+    }
 }

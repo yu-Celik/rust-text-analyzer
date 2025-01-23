@@ -4,22 +4,25 @@ use std::fs;
 
 #[derive(Debug)]
 pub struct TextAnalyzer {
-    content: String,
+    pub content: String,
     word_count: usize,
     word_frequency: HashMap<String, usize>,
     word_frequency_percentage: HashMap<String, f64>,
-    word_frequency_twograms: HashMap<String, usize>,
-    word_frequency_twograms_percentage: HashMap<String, f64>,
-    word_frequency_trigrams: HashMap<String, usize>,
-    word_frequency_trigrams_percentage: HashMap<String, f64>,
-    word_frequency_fourgrams: HashMap<String, usize>,
-    word_frequency_fourgrams_percentage: HashMap<String, f64>,
-    word_frequency_fivegrams: HashMap<String, usize>,
-    word_frequency_fivegrams_percentage: HashMap<String, f64>,
+    pub word_frequency_twograms: HashMap<String, usize>,
+    pub word_frequency_twograms_percentage: HashMap<String, f64>,
+    pub word_frequency_trigrams: HashMap<String, usize>,
+    pub word_frequency_trigrams_percentage: HashMap<String, f64>,
+    pub word_frequency_fourgrams: HashMap<String, usize>,
+    pub word_frequency_fourgrams_percentage: HashMap<String, f64>,
+    pub word_frequency_fivegrams: HashMap<String, usize>,
+    pub word_frequency_fivegrams_percentage: HashMap<String, f64>,
     average_word_length: f64,
     longest_sentences: Vec<String>,
     punctuation_stats: HashMap<char, usize>,
     ban_list: HashSet<String>,
+    // Statistiques pour chaque type de n-gramme
+    pub retained_expressions: HashMap<usize, usize>, // n -> nombre après filtrage
+    pub unique_expressions: HashMap<usize, usize>,   // n -> nombre avant filtrage
 }
 
 impl TextAnalyzer {
@@ -48,6 +51,8 @@ impl TextAnalyzer {
             longest_sentences: vec![],
             punctuation_stats: HashMap::new(),
             ban_list,
+            retained_expressions: HashMap::new(),
+            unique_expressions: HashMap::new(),
         })
     }
 
@@ -104,18 +109,27 @@ impl TextAnalyzer {
             .join(" ");
     }
 
-    pub fn word_frequency(&mut self) {
-        for word in self.content.split_whitespace() {
-            *self.word_frequency.entry(word.to_string()).or_insert(0) += 1;
-        }
+    pub fn clean_word(&mut self) {
+        let prefixes_to_remove = [
+            "l'", "l'", "d'", "d'", "n'", "n'", "j'", "j'", "s'", "s'", "c'", "c'", "l' ", "d' ",
+            "n' ", "j' ", "s' ", "c' ", "l' ", "d' ", "n' ", "j' ", "s' ", "c' ",
+        ];
 
-        // Calcul des pourcentages
-        let total_words = self.word_count as f64;
-        for (word, count) in &self.word_frequency {
-            let percentage = (*count as f64 * 100.0) / total_words;
-            self.word_frequency_percentage
-                .insert(word.clone(), percentage);
-        }
+        self.content = self
+            .content
+            .split_whitespace()
+            .map(|word| {
+                let mut cleaned = word.to_string();
+                for prefix in &prefixes_to_remove {
+                    if cleaned.to_lowercase().starts_with(prefix) {
+                        cleaned = cleaned[prefix.len()..].to_string();
+                        break;
+                    }
+                }
+                cleaned
+            })
+            .collect::<Vec<String>>()
+            .join(" ");
     }
 
     pub fn word_frequency_ngrams(&mut self, n: usize) {
@@ -124,23 +138,12 @@ impl TextAnalyzer {
             return;
         }
 
-        let (ngram_map, percentage_map) = match n {
-            2 => (
-                &mut self.word_frequency_twograms,
-                &mut self.word_frequency_twograms_percentage,
-            ),
-            3 => (
-                &mut self.word_frequency_trigrams,
-                &mut self.word_frequency_trigrams_percentage,
-            ),
-            4 => (
-                &mut self.word_frequency_fourgrams,
-                &mut self.word_frequency_fourgrams_percentage,
-            ),
-            5 => (
-                &mut self.word_frequency_fivegrams,
-                &mut self.word_frequency_fivegrams_percentage,
-            ),
+        let ngram_map = match n {
+            1 => &mut self.word_frequency,
+            2 => &mut self.word_frequency_twograms,
+            3 => &mut self.word_frequency_trigrams,
+            4 => &mut self.word_frequency_fourgrams,
+            5 => &mut self.word_frequency_fivegrams,
             _ => {
                 println!("Taille de n-gramme non prise en charge : {}", n);
                 return;
@@ -148,20 +151,81 @@ impl TextAnalyzer {
         };
 
         ngram_map.clear();
-        percentage_map.clear();
+        let mut all_ngrams = HashMap::new();
 
-        // Calcul des fréquences
-        for window in words.windows(n) {
-            let ngram = window.join(" ");
-            *ngram_map.entry(ngram).or_insert(0) += 1;
+        // Générer tous les n-grammes possibles
+        if n == 1 {
+            for word in words {
+                *all_ngrams.entry(word.to_string()).or_insert(0) += 1;
+            }
+        } else {
+            for i in 0..=words.len() - n {
+                let window = &words[i..i + n];
+                let ngram = window.join(" ");
+                *all_ngrams.entry(ngram).or_insert(0) += 1;
+            }
         }
 
-        // Calcul des pourcentages
+        // Sauvegarder le nombre d'expressions uniques (avant filtrage)
+        self.unique_expressions.insert(n, all_ngrams.len());
+
+        // Appliquer le filtre de la blacklist
+        for (ngram, count) in all_ngrams {
+            let is_valid = if n == 1 {
+                !self.ban_list.contains(&ngram)
+            } else {
+                let words: Vec<&str> = ngram.split_whitespace().collect();
+                !self.ban_list.contains(&words[0].to_string())
+                    && !self.ban_list.contains(&words[n - 1].to_string())
+            };
+
+            if is_valid {
+                *ngram_map.entry(ngram).or_insert(0) = count;
+            }
+        }
+
+        // Sauvegarder le nombre d'expressions retenues (après filtrage)
+        self.retained_expressions.insert(n, ngram_map.len());
+
+        // Calculer les pourcentages
         let total_words = self.word_count as f64;
-        for (ngram, count) in ngram_map.iter() {
-            let percentage = (*count as f64 * 100.0) / total_words;
-            percentage_map.insert(ngram.clone(), percentage);
+        match n {
+            1 => {
+                self.word_frequency_percentage =
+                    self.calculate_percentages(&self.word_frequency, total_words)
+            }
+            2 => {
+                self.word_frequency_twograms_percentage =
+                    self.calculate_percentages(&self.word_frequency_twograms, total_words)
+            }
+            3 => {
+                self.word_frequency_trigrams_percentage =
+                    self.calculate_percentages(&self.word_frequency_trigrams, total_words)
+            }
+            4 => {
+                self.word_frequency_fourgrams_percentage =
+                    self.calculate_percentages(&self.word_frequency_fourgrams, total_words)
+            }
+            5 => {
+                self.word_frequency_fivegrams_percentage =
+                    self.calculate_percentages(&self.word_frequency_fivegrams, total_words)
+            }
+            _ => {}
         }
+    }
+
+    fn calculate_percentages(
+        &self,
+        frequency_map: &HashMap<String, usize>,
+        total_words: f64,
+    ) -> HashMap<String, f64> {
+        frequency_map
+            .iter()
+            .map(|(word, count)| {
+                let percentage = (*count as f64 * 100.0) / total_words;
+                (word.clone(), percentage)
+            })
+            .collect()
     }
 
     pub fn count_words(&mut self) -> usize {
@@ -218,32 +282,32 @@ impl TextAnalyzer {
             .join(" ");
     }
 
-    pub fn print_content(&self) {
+    pub fn _print_content(&self) {
         println!("Content :\n{}", self.content);
     }
 
-    pub fn print_average_word_length(&self) {
+    pub fn _print_average_word_length(&self) {
         println!("Average word length: {:.2}", self.average_word_length);
     }
 
-    pub fn print_punctuation_stats(&self) {
+    pub fn _print_punctuation_stats(&self) {
         for (caractere, frequence) in &self.punctuation_stats {
             println!("The character '{}' appears {} times.", caractere, frequence);
         }
     }
 
-    pub fn print_longest_sentences(&self) {
+    pub fn _print_longest_sentences(&self) {
         println!("The 3 longest sentences :");
         for (i, sentence) in self.longest_sentences.iter().enumerate() {
             println!("{}. {}", i + 1, sentence);
         }
     }
 
-    pub fn print_word_count(&self) {
+    pub fn _print_word_count(&self) {
         println!("Word count : {}", self.word_count);
     }
 
-    pub fn print_ngram_frequency(&self, n: usize) {
+    pub fn _print_ngram_frequency(&self, n: usize) {
         let (ngram_map, percentage_map) = match n {
             1 => (&self.word_frequency, &self.word_frequency_percentage),
             2 => (
@@ -297,40 +361,136 @@ impl TextAnalyzer {
             }
         }
     }
-
-    // Méthode pour créer un nom de fichier avec préfixe
-    fn create_filename(&self, prefix: &str, filename: &str) -> String {
-        format!("{}_{}", prefix, filename)
-    }
-
     pub fn export_frequencies_to_csv(
         &self,
+        output_dir: &str,
         prefix: &str,
         filename: &str,
+        ngrams: &[usize], // Nouveau paramètre
     ) -> Result<(), Box<dyn Error>> {
         use std::fs::File;
         use std::io::{BufWriter, Write};
 
-        let full_filename = self.create_filename(prefix, filename);
+        let full_filename = format!("{}/{}_{}", output_dir, prefix, filename);
         let file = File::create(full_filename)?;
         let mut writer = BufWriter::new(file);
-
-        // Écrire le BOM UTF-8 pour Excel
         writer.write_all(&[0xEF, 0xBB, 0xBF])?;
+        writeln!(writer, "expression;type;occurrences;pourcentage")?;
 
-        // En-tête avec séparateur point-virgule
-        writeln!(writer, "mot;occurrences;pourcentage")?;
+        let mut all_frequencies = Vec::new();
 
-        // Trier les mots par fréquence
-        let mut frequency_vec: Vec<_> = self.word_frequency.iter().collect();
-        frequency_vec.sort_by(|a, b| b.1.cmp(a.1));
+        // Ajouter les n-grams selon le choix de l'utilisateur
+        for &n in ngrams {
+            match n {
+                1 => {
+                    for (word, count) in &self.word_frequency {
+                        let percentage = self.word_frequency_percentage.get(word).unwrap_or(&0.0);
+                        all_frequencies.push((word.clone(), "mot", *count, *percentage));
+                    }
+                }
+                2 => {
+                    for (gram, count) in &self.word_frequency_twograms {
+                        let percentage = self
+                            .word_frequency_twograms_percentage
+                            .get(gram)
+                            .unwrap_or(&0.0);
+                        all_frequencies.push((gram.clone(), "bigramme", *count, *percentage));
+                    }
+                }
+                3 => {
+                    for (gram, count) in &self.word_frequency_trigrams {
+                        let percentage = self
+                            .word_frequency_trigrams_percentage
+                            .get(gram)
+                            .unwrap_or(&0.0);
+                        all_frequencies.push((gram.clone(), "trigramme", *count, *percentage));
+                    }
+                }
+                4 => {
+                    for (gram, count) in &self.word_frequency_fourgrams {
+                        let percentage = self
+                            .word_frequency_fourgrams_percentage
+                            .get(gram)
+                            .unwrap_or(&0.0);
+                        all_frequencies.push((gram.clone(), "quadrigramme", *count, *percentage));
+                    }
+                }
+                5 => {
+                    for (gram, count) in &self.word_frequency_fivegrams {
+                        let percentage = self
+                            .word_frequency_fivegrams_percentage
+                            .get(gram)
+                            .unwrap_or(&0.0);
+                        all_frequencies.push((gram.clone(), "pentagramme", *count, *percentage));
+                    }
+                }
+                _ => {}
+            }
+        }
 
-        // Écrire les données avec séparation par point-virgule
-        for (word, count) in frequency_vec {
-            let percentage = self.word_frequency_percentage.get(word).unwrap_or(&0.0);
-            writeln!(writer, "{};{};{:.2}%", word, count, percentage)?;
+        all_frequencies.sort_by(|a, b| b.2.cmp(&a.2));
+
+        for (expr, gram_type, count, percentage) in all_frequencies {
+            writeln!(
+                writer,
+                "{};{};{};{:.2}%",
+                expr, gram_type, count, percentage
+            )?;
         }
 
         Ok(())
     }
+
+
+    pub fn _get_ngram_frequency(
+        &self,
+        n: usize,
+    ) -> Option<(&HashMap<String, usize>, &HashMap<String, f64>)> {
+        match n {
+            1 => Some((&self.word_frequency, &self.word_frequency_percentage)),
+            2 => Some((
+                &self.word_frequency_twograms,
+                &self.word_frequency_twograms_percentage,
+            )),
+            3 => Some((
+                &self.word_frequency_trigrams,
+                &self.word_frequency_trigrams_percentage,
+            )),
+            4 => Some((
+                &self.word_frequency_fourgrams,
+                &self.word_frequency_fourgrams_percentage,
+            )),
+            5 => Some((
+                &self.word_frequency_fivegrams,
+                &self.word_frequency_fivegrams_percentage,
+            )),
+            _ => None,
+        }
+    }
+
+    pub fn get_total_stats(&self) -> (usize, usize, usize) {
+        // Total des expressions retenues
+        let total_retained: usize = self.retained_expressions.values().sum();
+
+        // Total des expressions uniques
+        let total_unique: usize = self.unique_expressions.values().sum();
+
+        // Nombre total de mots
+        let word_count = self.word_count;
+
+        println!("\nStatistiques globales:");
+        println!(
+            "{} expressions retenues / {} expressions uniques sur un total de {} mots",
+            total_retained, total_unique, word_count
+        );
+
+        (total_retained, total_unique, word_count)
+    }
+
+    pub fn _count_word_frequency(&self, word: &String) -> usize {
+        self.word_frequency.get(word).copied().unwrap_or(0)
+    }
 }
+
+
+
