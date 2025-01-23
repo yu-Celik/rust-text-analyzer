@@ -118,6 +118,7 @@ fn create_analyzer(content: &str) -> Result<TextAnalyzer, Box<dyn Error>> {
     let mut analyzer = TextAnalyzer::new(content, "stop_words_french.txt")?;
     analyzer.analyze();
     analyzer.remove_special_characters();
+    analyzer.normalize_apostrophes();
     analyzer.clean_word();
     analyzer.count_words();
     Ok(analyzer)
@@ -173,6 +174,7 @@ fn update_frequencies(
 
 fn collect_document_stats(analyzer: &mut TextAnalyzer, url: &str, doc_stats: &mut Vec<DocumentStats>) {
     let (total_retained, total_unique, word_count) = analyzer.get_total_stats();
+    analyzer.filter_banned_words();
     let avg_word_length = analyzer.average_word_length();
     
     doc_stats.push(DocumentStats {
