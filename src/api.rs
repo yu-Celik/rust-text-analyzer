@@ -22,6 +22,8 @@ pub struct FrequencyResult {
     average_percentage: f64,
     #[serde(serialize_with = "serialize_f64_2_decimals")]
     doc_count_percentage: f64,
+    #[serde(serialize_with = "serialize_f64_2_decimals")]
+    average_doc_size: f64,
     sources: Vec<String>,
 }
 
@@ -47,6 +49,13 @@ pub struct AnalysisResponse {
     frequencies: Vec<FrequencyResult>,
     document_stats: Vec<DocumentStats>,
     url_statuses: Vec<UrlStatus>,
+}
+
+// Structure pour stocker les informations du document
+#[derive(Debug)]
+struct DocumentInfo {
+    url: String,
+    word_count: usize,
 }
 
 // Point d'entrée de l'API
@@ -96,13 +105,18 @@ async fn analyze_content(urls: Vec<String>, ngrams: Vec<usize>) -> Result<Analys
 async fn analyze_single_url(
     url: &str,
     ngrams: &[usize],
-    frequencies: &mut HashMap<(String, String), (f64, f64, Vec<String>)>,
+    frequencies: &mut HashMap<(String, String), (f64, f64, Vec<String>, Vec<usize>)>,
     doc_stats: &mut Vec<DocumentStats>,
 ) -> Result<(), Box<dyn Error>> {
     let content = fetch_and_prepare_content(url).await?;
     let mut analyzer = create_analyzer(&content)?;
     
-    process_ngrams(&mut analyzer, ngrams, url, frequencies);
+    let doc_info = DocumentInfo {
+        url: url.to_string(),
+        word_count: analyzer.count_words(),
+    };
+    
+    process_ngrams(&mut analyzer, ngrams, &doc_info, frequencies);
     collect_document_stats(&mut analyzer, url, doc_stats);
     
     Ok(())
@@ -127,15 +141,15 @@ fn create_analyzer(content: &str) -> Result<TextAnalyzer, Box<dyn Error>> {
 fn process_ngrams(
     analyzer: &mut TextAnalyzer,
     ngrams: &[usize],
-    url: &str,
-    frequencies: &mut HashMap<(String, String), (f64, f64, Vec<String>)>,
+    doc_info: &DocumentInfo,
+    frequencies: &mut HashMap<(String, String), (f64, f64, Vec<String>, Vec<usize>)>,
 ) {
     for &n in ngrams {
         analyzer.word_frequency_ngrams(n);
         
         if let Some((freq_map, percent_map)) = analyzer._get_ngram_frequency(n) {
             let gram_type = get_gram_type(n);
-            update_frequencies(freq_map, percent_map, gram_type, url, frequencies);
+            update_frequencies(freq_map, percent_map, gram_type, doc_info, frequencies);
         }
     }
 }
@@ -155,19 +169,20 @@ fn update_frequencies(
     freq_map: &HashMap<String, usize>,
     percent_map: &HashMap<String, f64>,
     gram_type: &str,
-    url: &str,
-    frequencies: &mut HashMap<(String, String), (f64, f64, Vec<String>)>,
+    doc_info: &DocumentInfo,
+    frequencies: &mut HashMap<(String, String), (f64, f64, Vec<String>, Vec<usize>)>,
 ) {
     for (expr, count) in freq_map {
         let percentage = *percent_map.get(expr).unwrap_or(&0.0);
         let entry = frequencies
             .entry((expr.clone(), gram_type.to_string()))
-            .or_insert((0.0, 0.0, Vec::new()));
+            .or_insert((0.0, 0.0, Vec::new(), Vec::new()));
         
         entry.0 += *count as f64;
         entry.1 += percentage;
-        if !entry.2.contains(&url.to_string()) {
-            entry.2.push(url.to_string());
+        if !entry.2.contains(&doc_info.url) {
+            entry.2.push(doc_info.url.clone());
+            entry.3.push(doc_info.word_count);
         }
     }
 }
@@ -195,19 +210,26 @@ fn create_url_status(url: &str, success: bool, error: Option<String>) -> UrlStat
 }
 
 fn process_frequencies(
-    frequencies: HashMap<(String, String), (f64, f64, Vec<String>)>,
+    frequencies: HashMap<(String, String), (f64, f64, Vec<String>, Vec<usize>)>,
     successful_urls: usize,
 ) -> Vec<FrequencyResult> {
     let mut results: Vec<FrequencyResult> = frequencies
         .into_iter()
-        .map(|((expr, gram_type), (count, percentage, sources))| {
+        .map(|((expr, gram_type), (count, percentage, sources, doc_sizes))| {
             let doc_count = sources.len() as f64;
+            let average_doc_size = if !doc_sizes.is_empty() {
+                doc_sizes.iter().sum::<usize>() as f64 / doc_sizes.len() as f64
+            } else {
+                0.0
+            };
+
             FrequencyResult {
                 expression: expr,
                 gram_type,
                 average_occurrences: count / doc_count,
                 average_percentage: percentage / doc_count,
                 doc_count_percentage: (doc_count / successful_urls as f64) * 100.0,
+                average_doc_size,
                 sources,
             }
         })
