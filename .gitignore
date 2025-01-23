@@ -1,1 +1,32 @@
-/target
+# Ignorer le fichier search_crawler.rs
+/src/search_crawler.rs
+src/search_crawler.rs
+
+# Ignorer les fichiers générés par Rust
+/target/
+**/*.rs.bk
+Cargo.lock
+
+# Ignorer les fichiers de l'IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Ignorer les fichiers de configuration locaux
+.env
+.env.local
+config.local.toml
+
+# Ignorer les fichiers de build
+/build/
+/dist/
+
+# Ignorer les fichiers de logs
+*.log
+logs/
+
+# Ignorer les fichiers temporaires
+*.tmp
+*.temp
+.DS_Store

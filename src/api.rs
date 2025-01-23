@@ -1,22 +1,15 @@
-use crate::text_analyzer::TextAnalyzer;
-use crate::web_analyzer::WebAnalyzer;
 use actix_web::{post, web, HttpResponse, Responder};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use crate::text_analyzer::TextAnalyzer;
+use crate::web_analyzer::WebAnalyzer;
 use std::error::Error;
-use std::fs::File;
-use std::io::{BufRead, BufReader};
+use std::collections::HashMap;
 
+// Structures de requête et réponse
 #[derive(Deserialize)]
 pub struct AnalysisRequest {
     urls: Vec<String>,
-    ngrams_to_analyze: Option<Vec<usize>>, // optionnel, par défaut [1,2,3]
-}
-
-#[derive(Serialize)]
-pub struct AnalysisResponse {
-    combined_frequencies: Vec<FrequencyResult>,
-    analysis_directory: String,
+    ngrams_to_analyze: Option<Vec<usize>>,
 }
 
 #[derive(Serialize)]
@@ -32,189 +25,206 @@ pub struct FrequencyResult {
     sources: Vec<String>,
 }
 
-// Fonction d'aide pour sérialiser avec 2 décimales
+#[derive(Serialize)]
+pub struct DocumentStats {
+    url: String,
+    total_retained: usize,
+    total_unique: usize,
+    word_count: usize,
+    #[serde(serialize_with = "serialize_f64_2_decimals")]
+    average_word_length: f64,
+}
+
+#[derive(Serialize)]
+pub struct UrlStatus {
+    url: String,
+    status: String,
+    error: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct AnalysisResponse {
+    frequencies: Vec<FrequencyResult>,
+    document_stats: Vec<DocumentStats>,
+    url_statuses: Vec<UrlStatus>,
+}
+
+// Point d'entrée de l'API
+#[post("/api/analyze")]
+pub async fn analyze_urls(data: web::Json<AnalysisRequest>) -> impl Responder {
+    let urls = data.urls.clone();
+    let ngrams = data.ngrams_to_analyze.clone().unwrap_or(vec![1, 2, 3]);
+    
+    match analyze_content(urls, ngrams).await {
+        Ok(response) => HttpResponse::Ok().json(response),
+        Err(e) => HttpResponse::InternalServerError().json(serde_json::json!({
+            "error": e.to_string()
+        }))
+    }
+}
+
+// Fonctions d'analyse
+async fn analyze_content(urls: Vec<String>, ngrams: Vec<usize>) -> Result<AnalysisResponse, Box<dyn Error>> {
+    let mut frequencies = HashMap::new();
+    let mut doc_stats = Vec::new();
+    let mut url_statuses = Vec::new();
+    let mut successful_urls = 0;
+    
+    for url in &urls {
+        match analyze_single_url(url, &ngrams, &mut frequencies, &mut doc_stats).await {
+            Ok(_) => {
+                successful_urls += 1;
+                url_statuses.push(create_url_status(url, true, None));
+            }
+            Err(e) => url_statuses.push(create_url_status(url, false, Some(e.to_string()))),
+        }
+    }
+
+    if successful_urls == 0 {
+        return Err("Aucune URL n'a pu être analysée".into());
+    }
+
+    let results = process_frequencies(frequencies, successful_urls);
+
+    Ok(AnalysisResponse {
+        frequencies: results,
+        document_stats: doc_stats,
+        url_statuses,
+    })
+}
+
+async fn analyze_single_url(
+    url: &str,
+    ngrams: &[usize],
+    frequencies: &mut HashMap<(String, String), (f64, f64, Vec<String>)>,
+    doc_stats: &mut Vec<DocumentStats>,
+) -> Result<(), Box<dyn Error>> {
+    let content = fetch_and_prepare_content(url).await?;
+    let mut analyzer = create_analyzer(&content)?;
+    
+    process_ngrams(&mut analyzer, ngrams, url, frequencies);
+    collect_document_stats(&mut analyzer, url, doc_stats);
+    
+    Ok(())
+}
+
+// Fonctions utilitaires
+async fn fetch_and_prepare_content(url: &str) -> Result<String, Box<dyn Error>> {
+    let mut web_analyzer = WebAnalyzer::new(url);
+    Ok(web_analyzer.fetch_and_analyze().await?)
+}
+
+fn create_analyzer(content: &str) -> Result<TextAnalyzer, Box<dyn Error>> {
+    let mut analyzer = TextAnalyzer::new(content, "stop_words_french.txt")?;
+    analyzer.analyze();
+    analyzer.remove_special_characters();
+    analyzer.clean_word();
+    analyzer.count_words();
+    Ok(analyzer)
+}
+
+fn process_ngrams(
+    analyzer: &mut TextAnalyzer,
+    ngrams: &[usize],
+    url: &str,
+    frequencies: &mut HashMap<(String, String), (f64, f64, Vec<String>)>,
+) {
+    for &n in ngrams {
+        analyzer.word_frequency_ngrams(n);
+        
+        if let Some((freq_map, percent_map)) = analyzer._get_ngram_frequency(n) {
+            let gram_type = get_gram_type(n);
+            update_frequencies(freq_map, percent_map, gram_type, url, frequencies);
+        }
+    }
+}
+
+fn get_gram_type(n: usize) -> &'static str {
+    match n {
+        1 => "mot",
+        2 => "bigramme",
+        3 => "trigramme",
+        4 => "quadrigramme",
+        5 => "pentagramme",
+        _ => "inconnu",
+    }
+}
+
+fn update_frequencies(
+    freq_map: &HashMap<String, usize>,
+    percent_map: &HashMap<String, f64>,
+    gram_type: &str,
+    url: &str,
+    frequencies: &mut HashMap<(String, String), (f64, f64, Vec<String>)>,
+) {
+    for (expr, count) in freq_map {
+        let percentage = *percent_map.get(expr).unwrap_or(&0.0);
+        let entry = frequencies
+            .entry((expr.clone(), gram_type.to_string()))
+            .or_insert((0.0, 0.0, Vec::new()));
+        
+        entry.0 += *count as f64;
+        entry.1 += percentage;
+        if !entry.2.contains(&url.to_string()) {
+            entry.2.push(url.to_string());
+        }
+    }
+}
+
+fn collect_document_stats(analyzer: &mut TextAnalyzer, url: &str, doc_stats: &mut Vec<DocumentStats>) {
+    let (total_retained, total_unique, word_count) = analyzer.get_total_stats();
+    let avg_word_length = analyzer.average_word_length();
+    
+    doc_stats.push(DocumentStats {
+        url: url.to_string(),
+        total_retained,
+        total_unique,
+        word_count,
+        average_word_length: avg_word_length,
+    });
+}
+
+fn create_url_status(url: &str, success: bool, error: Option<String>) -> UrlStatus {
+    UrlStatus {
+        url: url.to_string(),
+        status: if success { "ok" } else { "ko" }.to_string(),
+        error,
+    }
+}
+
+fn process_frequencies(
+    frequencies: HashMap<(String, String), (f64, f64, Vec<String>)>,
+    successful_urls: usize,
+) -> Vec<FrequencyResult> {
+    let mut results: Vec<FrequencyResult> = frequencies
+        .into_iter()
+        .map(|((expr, gram_type), (count, percentage, sources))| {
+            let doc_count = sources.len() as f64;
+            FrequencyResult {
+                expression: expr,
+                gram_type,
+                average_occurrences: count / doc_count,
+                average_percentage: percentage / doc_count,
+                doc_count_percentage: (doc_count / successful_urls as f64) * 100.0,
+                sources,
+            }
+        })
+        .collect();
+
+    results.sort_by(|a, b| {
+        b.doc_count_percentage
+            .partial_cmp(&a.doc_count_percentage)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then(b.average_occurrences.partial_cmp(&a.average_occurrences)
+            .unwrap_or(std::cmp::Ordering::Equal))
+    });
+
+    results
+}
+
 fn serialize_f64_2_decimals<S>(x: &f64, s: S) -> Result<S::Ok, S::Error>
 where
     S: serde::Serializer,
 {
     s.serialize_f64((x * 100.0).round() / 100.0)
-}
-
-#[post("/api/analyze")]
-pub async fn analyze_urls(data: web::Json<AnalysisRequest>) -> impl Responder {
-    let urls = data.urls.clone();
-    let ngrams = data.ngrams_to_analyze.clone().unwrap_or(vec![1, 2, 3]);
-
-    match perform_analysis(urls, ngrams).await {
-        Ok(results) => HttpResponse::Ok().json(results),
-        Err(e) => HttpResponse::InternalServerError().json(serde_json::json!({
-            "error": e.to_string()
-        })),
-    }
-}
-
-async fn perform_analysis(
-    urls: Vec<String>,
-    ngrams_to_analyze: Vec<usize>,
-) -> Result<AnalysisResponse, Box<dyn Error>> {
-    // Créer le dossier d'analyse
-    let analysis_dir = create_next_analysis_directory()?;
-    let mut all_analyzers = Vec::new();
-
-    // Analyser chaque URL
-    for url in &urls {
-        let mut web_analyzer = WebAnalyzer::new(url);
-        web_analyzer.fetch_and_analyze(&analysis_dir).await?;
-
-        let prefix = web_analyzer.get_domain_prefix();
-        let input_file = format!("{}/{}_output.txt", analysis_dir, prefix);
-
-        if std::path::Path::new(&input_file).exists() {
-            let mut text_analyzer = TextAnalyzer::new(&input_file, "stop_words_french.txt")?;
-
-            // Effectuer l'analyse complète
-            text_analyzer.analyze();
-            text_analyzer.longest_sentences(5);
-            text_analyzer.punctuation_stats();
-            text_analyzer.remove_special_characters();
-            text_analyzer.count_words();
-            text_analyzer.clean_word();
-
-            for n in &ngrams_to_analyze {
-                text_analyzer.word_frequency_ngrams(*n);
-            }
-
-            text_analyzer.get_total_stats();
-            text_analyzer.average_word_length();
-
-            // Exporter les fréquences individuelles
-            text_analyzer.export_frequencies_to_csv(
-                &analysis_dir,
-                &prefix,
-                "frequencies.csv",
-                &ngrams_to_analyze,
-            )?;
-
-            all_analyzers.push((prefix, text_analyzer));
-        }
-    }
-
-    // Combiner les résultats
-    let combined_path = format!("{}/combined_frequencies.csv", analysis_dir);
-    let combined_results = export_combined_results(&all_analyzers, &combined_path)?;
-
-    Ok(AnalysisResponse {
-        combined_frequencies: combined_results,
-        analysis_directory: analysis_dir,
-    })
-}
-
-fn create_next_analysis_directory() -> Result<String, Box<dyn Error>> {
-    let mut counter = 1;
-    loop {
-        let dir_name = format!("analyse{}", counter);
-        if !std::path::Path::new(&dir_name).exists() {
-            std::fs::create_dir(&dir_name)?;
-            return Ok(dir_name);
-        }
-        counter += 1;
-    }
-}
-
-fn export_combined_results(
-    analyzers: &[(String, TextAnalyzer)],
-    output_filename: &str,
-) -> Result<Vec<FrequencyResult>, Box<dyn Error>> {
-    let mut all_frequencies = Vec::new();
-    let total_docs = analyzers.len() as f64;
-
-    // Extraire le dossier d'analyse du chemin de sortie
-    let analysis_dir = std::path::Path::new(output_filename)
-        .parent()
-        .ok_or("Impossible d'obtenir le dossier parent")?
-        .to_str()
-        .ok_or("Chemin invalide")?;
-
-    // Lire chaque fichier CSV individuel
-    for (prefix, _) in analyzers {
-        let input_filename = format!("{}/{}_frequencies.csv", analysis_dir, prefix);
-        let file = match File::open(&input_filename) {
-            Ok(f) => f,
-            Err(_) => continue,
-        };
-
-        let reader = BufReader::new(file);
-        let mut lines = reader.lines();
-        let _ = lines.next(); // Sauter l'en-tête
-
-        for line in lines {
-            if let Ok(line) = line {
-                let parts: Vec<&str> = line.split(';').collect();
-                if parts.len() >= 4 {
-                    let expr = parts[0].to_string();
-                    let gram_type = parts[1].to_string();
-                    let count: usize = parts[2].parse().unwrap_or(0);
-                    let percentage: f64 = parts[3].trim_end_matches('%').parse().unwrap_or(0.0);
-
-                    all_frequencies.push((expr, gram_type, count, percentage, prefix.clone()));
-                }
-            }
-        }
-    }
-
-    // Regrouper par expression et type
-    let mut combined_stats: HashMap<(String, String), (usize, f64, Vec<String>)> = HashMap::new();
-    for (expr, gram_type, count, percentage, source) in all_frequencies {
-        let entry = combined_stats
-            .entry((expr, gram_type))
-            .or_insert((0, 0.0, Vec::new()));
-
-        entry.0 += count;
-        entry.1 += percentage;
-        if !entry.2.contains(&source) {
-            entry.2.push(source);
-        }
-    }
-
-    // Convertir en vecteur et trier d'abord par doc_count puis par occurrences
-    let mut combined_vec: Vec<_> = combined_stats.into_iter().collect();
-    combined_vec.sort_by(|a, b| {
-        // Calculer les pourcentages de documents pour a et b
-        let doc_count_a = (a.1 .2.len() as f64 / total_docs) * 100.0;
-        let doc_count_b = (b.1 .2.len() as f64 / total_docs) * 100.0;
-
-        // Comparer d'abord par doc_count
-        match doc_count_b
-            .partial_cmp(&doc_count_a)
-            .unwrap_or(std::cmp::Ordering::Equal)
-        {
-            std::cmp::Ordering::Equal => {
-                // Si égaux, comparer par moyenne d'occurrences
-                let avg_a = a.1 .0 as f64 / a.1 .2.len() as f64;
-                let avg_b = b.1 .0 as f64 / b.1 .2.len() as f64;
-                avg_b
-                    .partial_cmp(&avg_a)
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            }
-            other => other,
-        }
-    });
-
-    let mut results = Vec::new();
-    for ((expr, gram_type), (total_count, total_percentage, sources)) in combined_vec {
-        let avg_count = total_count as f64 / sources.len() as f64;
-        let avg_percentage = total_percentage / sources.len() as f64;
-        let doc_count_percentage = (sources.len() as f64 / total_docs) * 100.0;
-
-        results.push(FrequencyResult {
-            expression: expr,
-            gram_type,
-            average_occurrences: avg_count,
-            average_percentage: avg_percentage,
-            doc_count_percentage,
-            sources,
-        });
-    }
-
-    Ok(results)
 }

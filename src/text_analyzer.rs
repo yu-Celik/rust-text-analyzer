@@ -26,8 +26,7 @@ pub struct TextAnalyzer {
 }
 
 impl TextAnalyzer {
-    pub fn new(file_path: &str, stop_words_path: &str) -> Result<Self, Box<dyn Error>> {
-        let content = fs::read_to_string(file_path)?;
+    pub fn new(content: &str, stop_words_path: &str) -> Result<Self, Box<dyn Error>> {
         let stop_words_content = fs::read_to_string(stop_words_path)?;
         let ban_list: HashSet<String> = stop_words_content
             .lines()
@@ -35,7 +34,7 @@ impl TextAnalyzer {
             .collect();
 
         Ok(TextAnalyzer {
-            content,
+            content: content.to_string(),
             word_count: 0,
             word_frequency: HashMap::new(),
             word_frequency_percentage: HashMap::new(),
@@ -109,10 +108,17 @@ impl TextAnalyzer {
             .join(" ");
     }
 
+    pub fn normalize_apostrophes(&mut self) {
+        self.content = self
+            .content
+            .replace('\u{2019}', "'") // Remplace l'apostrophe typographique par l'apostrophe simple
+            .replace('\u{2018}', "'") // Remplace l'apostrophe simple gauche
+            .replace('\u{201B}', "'") // Remplace l'apostrophe simple haute
+    }
+
     pub fn clean_word(&mut self) {
         let prefixes_to_remove = [
-            "l'", "l'", "d'", "d'", "n'", "n'", "j'", "j'", "s'", "s'", "c'", "c'", "l' ", "d' ",
-            "n' ", "j' ", "s' ", "c' ", "l' ", "d' ", "n' ", "j' ", "s' ", "c' ",
+            "l'", "d'", "n'", "j'", "s'", "c'", "t'", "l'", "d'", "n'", "j'", "s'", "c'", "t'",
         ];
 
         self.content = self
@@ -190,16 +196,26 @@ impl TextAnalyzer {
         // Calculer les pourcentages
         let total_words = self.word_count as f64;
         match n {
-            1 => self.word_frequency_percentage = 
-                self.calculate_percentages(&self.word_frequency, total_words),
-            2 => self.word_frequency_twograms_percentage = 
-                self.calculate_percentages(&self.word_frequency_twograms, total_words),
-            3 => self.word_frequency_trigrams_percentage = 
-                self.calculate_percentages(&self.word_frequency_trigrams, total_words),
-            4 => self.word_frequency_fourgrams_percentage = 
-                self.calculate_percentages(&self.word_frequency_fourgrams, total_words),
-            5 => self.word_frequency_fivegrams_percentage = 
-                self.calculate_percentages(&self.word_frequency_fivegrams, total_words),
+            1 => {
+                self.word_frequency_percentage =
+                    self.calculate_percentages(&self.word_frequency, total_words)
+            }
+            2 => {
+                self.word_frequency_twograms_percentage =
+                    self.calculate_percentages(&self.word_frequency_twograms, total_words)
+            }
+            3 => {
+                self.word_frequency_trigrams_percentage =
+                    self.calculate_percentages(&self.word_frequency_trigrams, total_words)
+            }
+            4 => {
+                self.word_frequency_fourgrams_percentage =
+                    self.calculate_percentages(&self.word_frequency_fourgrams, total_words)
+            }
+            5 => {
+                self.word_frequency_fivegrams_percentage =
+                    self.calculate_percentages(&self.word_frequency_fivegrams, total_words)
+            }
             _ => {}
         }
     }
@@ -241,7 +257,16 @@ impl TextAnalyzer {
         self.average_word_length
     }
 
-    pub fn longest_sentences(&mut self, n: usize) -> &[String] {
+    pub fn filter_banned_words(&mut self) {
+        let words: Vec<&str> = self.content.split_whitespace().collect();
+        self.content = words
+            .into_iter()
+            .filter(|word| !self.ban_list.contains(*word))
+            .collect::<Vec<&str>>()
+            .join(" ");
+    }
+
+    pub fn _longest_sentences(&mut self, n: usize) -> &[String] {
         let sentences: Vec<&str> = self.content.split_inclusive(&['.', '!', '?']).collect();
         self.longest_sentences = sentences
             .into_iter()
@@ -254,22 +279,13 @@ impl TextAnalyzer {
         &self.longest_sentences
     }
 
-    pub fn punctuation_stats(&mut self) -> &HashMap<char, usize> {
+    pub fn _punctuation_stats(&mut self) -> &HashMap<char, usize> {
         self.punctuation_stats.clear();
         self.content
             .chars()
             .filter(|&c| c.is_ascii_punctuation())
             .for_each(|c| *self.punctuation_stats.entry(c).or_insert(0) += 1);
         &self.punctuation_stats
-    }
-
-    pub fn filter_banned_words(&mut self) {
-        let words: Vec<&str> = self.content.split_whitespace().collect();
-        self.content = words
-            .into_iter()
-            .filter(|word| !self.ban_list.contains(*word))
-            .collect::<Vec<&str>>()
-            .join(" ");
     }
 
     pub fn _print_content(&self) {
@@ -351,86 +367,7 @@ impl TextAnalyzer {
             }
         }
     }
-    pub fn export_frequencies_to_csv(
-        &self,
-        output_dir: &str,
-        prefix: &str,
-        filename: &str,
-        ngrams: &[usize], // Nouveau paramètre
-    ) -> Result<(), Box<dyn Error>> {
-        use std::fs::File;
-        use std::io::{BufWriter, Write};
-
-        let full_filename = format!("{}/{}_{}", output_dir, prefix, filename);
-        let file = File::create(full_filename)?;
-        let mut writer = BufWriter::new(file);
-        writer.write_all(&[0xEF, 0xBB, 0xBF])?;
-        writeln!(writer, "expression;type;occurrences;pourcentage")?;
-
-        let mut all_frequencies = Vec::new();
-
-        // Ajouter les n-grams selon le choix de l'utilisateur
-        for &n in ngrams {
-            match n {
-                1 => {
-                    for (word, count) in &self.word_frequency {
-                        let percentage = self.word_frequency_percentage.get(word).unwrap_or(&0.0);
-                        all_frequencies.push((word.clone(), "mot", *count, *percentage));
-                    }
-                }
-                2 => {
-                    for (gram, count) in &self.word_frequency_twograms {
-                        let percentage = self
-                            .word_frequency_twograms_percentage
-                            .get(gram)
-                            .unwrap_or(&0.0);
-                        all_frequencies.push((gram.clone(), "bigramme", *count, *percentage));
-                    }
-                }
-                3 => {
-                    for (gram, count) in &self.word_frequency_trigrams {
-                        let percentage = self
-                            .word_frequency_trigrams_percentage
-                            .get(gram)
-                            .unwrap_or(&0.0);
-                        all_frequencies.push((gram.clone(), "trigramme", *count, *percentage));
-                    }
-                }
-                4 => {
-                    for (gram, count) in &self.word_frequency_fourgrams {
-                        let percentage = self
-                            .word_frequency_fourgrams_percentage
-                            .get(gram)
-                            .unwrap_or(&0.0);
-                        all_frequencies.push((gram.clone(), "quadrigramme", *count, *percentage));
-                    }
-                }
-                5 => {
-                    for (gram, count) in &self.word_frequency_fivegrams {
-                        let percentage = self
-                            .word_frequency_fivegrams_percentage
-                            .get(gram)
-                            .unwrap_or(&0.0);
-                        all_frequencies.push((gram.clone(), "pentagramme", *count, *percentage));
-                    }
-                }
-                _ => {}
-            }
-        }
-
-        all_frequencies.sort_by(|a, b| b.2.cmp(&a.2));
-
-        for (expr, gram_type, count, percentage) in all_frequencies {
-            writeln!(
-                writer,
-                "{};{};{};{:.2}%",
-                expr, gram_type, count, percentage
-            )?;
-        }
-
-        Ok(())
-    }
-
+    
 
     pub fn _get_ngram_frequency(
         &self,
@@ -468,20 +405,11 @@ impl TextAnalyzer {
         // Nombre total de mots
         let word_count = self.word_count;
 
-
-        println!("\nStatistiques globales:");
-        println!(
-            "{} expressions retenues / {} expressions uniques sur un total de {} mots",
-            total_retained, total_unique, word_count
-        );
-
         (total_retained, total_unique, word_count)
     }
 
     pub fn _count_word_frequency(&self, word: &String) -> usize {
         self.word_frequency.get(word).copied().unwrap_or(0)
     }
+
 }
-
-
-

@@ -1,4 +1,3 @@
-mod html_analyzer;
 mod search_crawler;
 mod tests;
 mod text_analyzer;
