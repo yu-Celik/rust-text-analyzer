@@ -243,6 +243,9 @@ fn process_frequencies(
             .unwrap_or(std::cmp::Ordering::Equal))
     });
 
+    // Limiter à 1000 résultats
+    results.truncate(1000);
+
     results
 }
 
